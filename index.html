@@ -1,4 +1,5 @@
-!DOCTYPE html>
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -217,6 +218,28 @@
       );
     }
 
+    function playChime() {
+      try {
+        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+        var notes = [523.25, 659.25, 783.99, 1046.50];
+        notes.forEach(function(freq, i) {
+          var osc = ctx.createOscillator();
+          var gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, ctx.currentTime);
+          var start = ctx.currentTime + i * 0.22;
+          var end = start + 0.6;
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(0.18, start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, end);
+          osc.start(start);
+          osc.stop(end);
+        });
+      } catch(e) {}
+    }
+
     function App() {
       const [phase, setPhase] = useState("entry");
       const [mode, setMode] = useState("timer");
@@ -242,22 +265,29 @@
         if (intervalRef.current) clearInterval(intervalRef.current);
       }, []);
 
-      const startCounting = useCallback(() => {
+      const startRef = useRef(null);
+      const totalRef = useRef(0);
+
+      const startCounting = useCallback((remainingAtStart) => {
         clearTimer();
+        startRef.current = Date.now();
+        totalRef.current = remainingAtStart !== undefined ? remainingAtStart : totalRef.current;
         intervalRef.current = setInterval(() => {
-          elapsedRef.current += 1;
-          setElapsed(function(e) { return e + 1; });
+          var secondsElapsed = Math.floor((Date.now() - startRef.current) / 1000);
+          elapsedRef.current = secondsElapsed;
+          setElapsed(secondsElapsed);
           if (modeRef.current !== "stopwatch") {
-            setTimeLeft(function(prev) {
-              if (prev <= 1) {
-                clearInterval(intervalRef.current);
-                setPhase("done");
-                return 0;
-              }
-              return prev - 1;
-            });
+            var left = totalRef.current - secondsElapsed;
+            if (left <= 0) {
+              clearInterval(intervalRef.current);
+              setTimeLeft(0);
+              setPhase("done");
+              playChime();
+            } else {
+              setTimeLeft(left);
+            }
           }
-        }, 1000);
+        }, 500);
       }, [clearTimer]);
 
       const handleStart = () => {
@@ -266,6 +296,7 @@
           const mins = parseFloat(minutes);
           if (isNaN(mins) || mins <= 0) return;
           const secs = Math.round(mins * 60);
+          totalRef.current = secs;
           setTotal(secs);
           setTimeLeft(secs);
         }
@@ -275,12 +306,24 @@
         setElapsed(0);
         setPhase("running");
         setPaused(false);
-        startCounting();
+        startCounting(mode === "timer" ? Math.round(parseFloat(minutes) * 60) : undefined);
       };
 
+      const pausedTimeLeftRef = useRef(0);
+      const pausedElapsedRef = useRef(0);
+
       const handlePause = () => {
-        if (paused) { startCounting(); setPaused(false); }
-        else { clearTimer(); setPaused(true); }
+        if (paused) {
+          startRef.current = Date.now() - pausedElapsedRef.current * 1000;
+          totalRef.current = pausedTimeLeftRef.current + pausedElapsedRef.current;
+          startCounting(totalRef.current);
+          setPaused(false);
+        } else {
+          clearTimer();
+          pausedTimeLeftRef.current = timeLeft;
+          pausedElapsedRef.current = elapsedRef.current;
+          setPaused(true);
+        }
       };
 
       const handleDone = () => {
