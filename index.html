@@ -263,23 +263,22 @@
 
       const clearTimer = useCallback(() => {
         if (intervalRef.current) clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }, []);
 
-      const startRef = useRef(null);
-      const totalRef = useRef(0);
-
-      const startCounting = useCallback((remainingAtStart) => {
-        clearTimer();
-        startRef.current = Date.now();
-        totalRef.current = remainingAtStart !== undefined ? remainingAtStart : totalRef.current;
-        intervalRef.current = setInterval(() => {
-          var secondsElapsed = Math.floor((Date.now() - startRef.current) / 1000);
+      // tick: recalculate display from wall clock
+      const tick = useCallback(() => {
+        try {
+          var session = JSON.parse(localStorage.getItem("pt-session") || "null");
+          if (!session || session.paused) return;
+          var secondsElapsed = Math.floor((Date.now() - session.startedAt) / 1000);
           elapsedRef.current = secondsElapsed;
           setElapsed(secondsElapsed);
-          if (modeRef.current !== "stopwatch") {
-            var left = totalRef.current - secondsElapsed;
+          if (session.mode !== "stopwatch") {
+            var left = session.totalSecs - secondsElapsed;
             if (left <= 0) {
-              clearInterval(intervalRef.current);
+              clearTimer();
+              localStorage.removeItem("pt-session");
               setTimeLeft(0);
               setPhase("done");
               playChime();
@@ -287,52 +286,66 @@
               setTimeLeft(left);
             }
           }
-        }, 500);
+        } catch(e) {}
       }, [clearTimer]);
+
+      const startCounting = useCallback(() => {
+        clearTimer();
+        intervalRef.current = setInterval(tick, 500);
+      }, [clearTimer, tick]);
 
       const handleStart = () => {
         if (!task.trim()) return;
+        var secs = 0;
         if (mode === "timer") {
-          const mins = parseFloat(minutes);
+          var mins = parseFloat(minutes);
           if (isNaN(mins) || mins <= 0) return;
-          const secs = Math.round(mins * 60);
-          totalRef.current = secs;
+          secs = Math.round(mins * 60);
           setTotal(secs);
           setTimeLeft(secs);
         }
+        var session = { task: task.trim(), mode: mode, startedAt: Date.now(), totalSecs: secs, paused: false };
+        try { localStorage.setItem("pt-session", JSON.stringify(session)); } catch(e) {}
         modeRef.current = mode;
         taskRef.current = task.trim();
         elapsedRef.current = 0;
         setElapsed(0);
         setPhase("running");
         setPaused(false);
-        startCounting(mode === "timer" ? Math.round(parseFloat(minutes) * 60) : undefined);
+        startCounting();
       };
-
-      const pausedTimeLeftRef = useRef(0);
-      const pausedElapsedRef = useRef(0);
 
       const handlePause = () => {
         if (paused) {
-          startRef.current = Date.now() - pausedElapsedRef.current * 1000;
-          totalRef.current = pausedTimeLeftRef.current + pausedElapsedRef.current;
-          startCounting(totalRef.current);
+          try {
+            var session = JSON.parse(localStorage.getItem("pt-session") || "null");
+            if (session) {
+              session.startedAt = Date.now() - elapsedRef.current * 1000;
+              session.paused = false;
+              localStorage.setItem("pt-session", JSON.stringify(session));
+            }
+          } catch(e) {}
+          startCounting();
           setPaused(false);
         } else {
           clearTimer();
-          pausedTimeLeftRef.current = timeLeft;
-          pausedElapsedRef.current = elapsedRef.current;
+          try {
+            var session = JSON.parse(localStorage.getItem("pt-session") || "null");
+            if (session) { session.paused = true; localStorage.setItem("pt-session", JSON.stringify(session)); }
+          } catch(e) {}
           setPaused(true);
         }
       };
 
       const handleDone = () => {
         clearTimer();
+        try { localStorage.removeItem("pt-session"); } catch(e) {}
         setPhase("rating");
       };
 
       const handleStop = () => {
         clearTimer();
+        try { localStorage.removeItem("pt-session"); } catch(e) {}
         setPhase("rating");
       };
 
@@ -353,26 +366,14 @@
 
       useEffect(() => {
         const handleVisible = () => {
-          if (document.visibilityState === "visible" && !paused && startRef.current) {
-            var secondsElapsed = Math.floor((Date.now() - startRef.current) / 1000);
-            elapsedRef.current = secondsElapsed;
-            setElapsed(secondsElapsed);
-            if (modeRef.current !== "stopwatch") {
-              var left = totalRef.current - secondsElapsed;
-              if (left <= 0) {
-                clearTimer();
-                setTimeLeft(0);
-                setPhase("done");
-                playChime();
-              } else {
-                setTimeLeft(left);
-              }
-            }
+          if (document.visibilityState === "visible") {
+            tick();
+            startCounting();
           }
         };
         document.addEventListener("visibilitychange", handleVisible);
         return () => document.removeEventListener("visibilitychange", handleVisible);
-      }, [paused, clearTimer]);
+      }, [tick, startCounting]);
 
       useEffect(() => () => clearTimer(), [clearTimer]);
 
