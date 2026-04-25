@@ -1,5 +1,4 @@
-
-<!DOCTYPE html>
+!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -226,7 +225,13 @@
       const [timeLeft, setTimeLeft] = useState(0);
       const [total, setTotal] = useState(0);
       const [paused, setPaused] = useState(false);
-      const [history, setHistory] = useState([]);
+      const todayKey = "pt-history-" + new Date().toISOString().slice(0, 10);
+      const [history, setHistory] = useState(function() {
+        try {
+          var saved = localStorage.getItem(todayKey);
+          return saved ? JSON.parse(saved) : [];
+        } catch(e) { return []; }
+      });
       const [elapsed, setElapsed] = useState(0);
       const intervalRef = useRef(null);
       const taskRef = useRef("");
@@ -290,7 +295,11 @@
 
       const handleSaveRating = (rating, comment) => {
         const entry = { task: taskRef.current, elapsed: elapsedRef.current, rating: rating, comment: comment };
-        setHistory(function(h) { return [entry, ...h]; });
+        setHistory(function(h) {
+          const next = [entry, ...h];
+          try { localStorage.setItem(todayKey, JSON.stringify(next)); } catch(e) {}
+          return next;
+        });
         setPhase("entry");
         setTask("");
         setMinutes("");
