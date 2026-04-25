@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Present Tense</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #F5F0E8; }
+    textarea, input, button { font-family: inherit; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+```
+const COLORS = {
+  bg: "#F5F0E8",
+  paper: "#FDFAF4",
+  ink: "#1C1A16",
+  faded: "#8C8070",
+  accent: "#C94A2A",
+  ring: "#D4C9B8",
+  done: "#3A7A5C",
+};
+
+const pad = (n) => String(n).padStart(2, "0");
+
+function CircularTimer({ progress, timeLeft, total, paused, done }) {
+  const r = 90;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - progress);
+  const mins = Math.floor(timeLeft / 60);
+  const secs = timeLeft % 60;
+
+  return (
+    <div style={{ position: "relative", width: 220, height: 220, margin: "0 auto" }}>
+      <svg width="220" height="220" style={{ transform: "rotate(-90deg)" }}>
+        <circle cx="110" cy="110" r={r} fill="none" stroke={COLORS.ring} strokeWidth="10" />
+        <circle
+          cx="110" cy="110" r={r} fill="none"
+          stroke={done ? COLORS.done : COLORS.accent}
+          strokeWidth="10"
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{ transition: paused ? "none" : "stroke-dashoffset 1s linear" }}
+        />
+      </svg>
+      <div style={{
+        position: "absolute", inset: 0, display: "flex",
+        flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2,
+      }}>
+        <span style={{
+          fontFamily: "'Courier New', monospace", fontSize: 42, fontWeight: "bold",
+          color: done ? COLORS.done : COLORS.ink, letterSpacing: "-2px", lineHeight: 1,
+        }}>
+          {pad(mins)}:{pad(secs)}
+        </span>
+        {total > 0 && (
+          <span style={{ fontFamily: "Georgia, serif", fontSize: 11, color: COLORS.faded }}>
+            of {Math.floor(total / 60)} min
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function exportMarkdown(history) {
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const totalSecs = history.reduce((sum, h) => sum + h.elapsed, 0);
+  const totalMins = Math.floor(totalSecs / 60);
+  const totalRemSecs = totalSecs % 60;
+  const lines = [
+    `- ${today}`,
+    `\t- Total focused time: ${totalMins}m ${totalRemSecs}s`,
+    ...history.slice().reverse().map((h) => {
+      const m = Math.floor(h.elapsed / 60);
+      const s = h.elapsed % 60;
+      return `\t\t- ${h.task} :: ${m}m ${s}s`;
+    }),
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `present-tense-${new Date().toISOString().slice(0, 10)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function TaskCard({ task, elapsed }) {
+  return (
+    <div style={{
+      background: COLORS.paper, border: `1.5px solid ${COLORS.ring}`,
+      borderRadius: 4, padding: "8px 14px", display: "flex",
+      justifyContent: "space-between", alignItems: "center", gap: 12,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ color: COLORS.done, fontSize: 14 }}>✓</span>
+        <span style={{ fontFamily: "Georgia, serif", fontSize: 13, color: COLORS.ink }}>{task}</span>
+      </div>
+      <span style={{ fontFamily: "'Courier New', monospace", fontSize: 11, color: COLORS.faded, whiteSpace: "nowrap" }}>
+        {Math.floor(elapsed / 60)}m {elapsed % 60}s
+      </span>
+    </div>
+  );
+}
+
+function App() {
+  const [phase, setPhase] = useState("entry");
+  const [task, setTask] = useState("");
+  const [minutes, setMinutes] = useState("");
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [elapsed, setElapsed] = useState(0);
+  const intervalRef = useRef(null);
+  const taskRef = useRef("");
+  const elapsedRef = useRef(0);
+
+  const clearTimer = useCallback(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  }, []);
+
+  const startCounting = useCallback(() => {
+    clearTimer();
+    intervalRef.current = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(intervalRef.current);
+          setPhase("done");
+          return 0;
+        }
+        return prev - 1;
+      });
+      elapsedRef.current += 1;
+      setElapsed((e) => e + 1);
+    }, 1000);
+  }, [clearTimer]);
+
+  const handleStart = () => {
+    const mins = parseFloat(minutes);
+    if (!task.trim() || isNaN(mins) || mins <= 0) return;
+    const secs = Math.round(mins * 60);
+    taskRef.current = task.trim();
+    elapsedRef.current = 0;
+    setElapsed(0);
+    setTotal(secs);
+    setTimeLeft(secs);
+    setPhase("running");
+    setPaused(false);
+    startCounting();
+  };
+
+  const handlePause = () => {
+    if (paused) { startCounting(); setPaused(false); }
+    else { clearTimer(); setPaused(true); }
+  };
+
+  const handleDone = () => {
+    clearTimer();
+    setHistory((h) => [{ task: taskRef.current, elapsed: elapsedRef.current }, ...h]);
+    setPhase("entry"); setTask(""); setMinutes(""); setTimeLeft(0); setTotal(0); setPaused(false);
+  };
+
+  const handleStop = () => {
+    clearTimer();
+    setHistory((h) => [{ task: taskRef.current, elapsed: elapsedRef.current }, ...h]);
+    setPhase("entry"); setTask(""); setMinutes(""); setPaused(false);
+  };
+
+  useEffect(() => () => clearTimer(), [clearTimer]);
+
+  const progress = total > 0 ? timeLeft / total : 0;
+  const isDone = phase === "done";
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: COLORS.bg, display: "flex",
+      flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
+      padding: "40px 20px 60px", fontFamily: "Georgia, serif",
+    }}>
+      <div style={{ textAlign: "center", marginBottom: 36 }}>
+        <div style={{ fontSize: 11, letterSpacing: 4, color: COLORS.faded, textTransform: "uppercase", marginBottom: 6 }}>
+          Present Tense
+        </div>
+        <div style={{ width: 32, height: 1.5, background: COLORS.accent, margin: "0 auto" }} />
+      </div>
+
+      <div style={{
+        background: COLORS.paper, border: `1.5px solid ${COLORS.ring}`, borderRadius: 6,
+        padding: "36px 32px", width: "100%", maxWidth: 380,
+        boxShadow: "0 2px 24px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04)",
+      }}>
+        {phase === "entry" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 8 }}>
+                What are you doing?
+              </label>
+              <textarea
+                value={task} onChange={(e) => setTask(e.target.value)}
+                placeholder="Writing weekly review…" rows={2}
+                style={{
+                  width: "100%", background: COLORS.bg, border: `1px solid ${COLORS.ring}`,
+                  borderRadius: 4, padding: "10px 12px", fontFamily: "Georgia, serif",
+                  fontSize: 15, color: COLORS.ink, resize: "none", outline: "none", lineHeight: 1.5,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    document.getElementById("mins-input")?.focus();
+                  }
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 8 }}>
+                For how long? (minutes)
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[5, 10, 15, 25, 45].map((m) => (
+                  <button key={m} onClick={() => setMinutes(String(m))} style={{
+                    background: minutes === String(m) ? COLORS.accent : COLORS.bg,
+                    color: minutes === String(m) ? "#fff" : COLORS.faded,
+                    border: `1px solid ${minutes === String(m) ? COLORS.accent : COLORS.ring}`,
+                    borderRadius: 3, padding: "5px 10px",
+                    fontFamily: "'Courier New', monospace", fontSize: 12, cursor: "pointer",
+                  }}>{m}</button>
+                ))}
+                <input
+                  id="mins-input" type="number" value={minutes}
+                  onChange={(e) => setMinutes(e.target.value)}
+                  placeholder="other" min="0.5" step="0.5"
+                  style={{
+                    width: 70, background: COLORS.bg, border: `1px solid ${COLORS.ring}`,
+                    borderRadius: 3, padding: "5px 10px",
+                    fontFamily: "'Courier New', monospace", fontSize: 12, color: COLORS.ink, outline: "none",
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && handleStart()}
+                />
+              </div>
+            </div>
+            <button onClick={handleStart}
+              disabled={!task.trim() || !minutes || isNaN(parseFloat(minutes)) || parseFloat(minutes) <= 0}
+              style={{
+                background: COLORS.accent, color: "#fff", border: "none", borderRadius: 4,
+                padding: "13px", fontSize: 13, letterSpacing: 3, textTransform: "uppercase",
+                cursor: "pointer", fontFamily: "Georgia, serif",
+                opacity: (!task.trim() || !minutes) ? 0.4 : 1, marginTop: 4,
+              }}>
+              Begin
+            </button>
+          </div>
+        )}
+
+        {(phase === "running" || phase === "done") && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 24, alignItems: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 6 }}>
+                {isDone ? "Completed" : paused ? "Paused" : "Now"}
+              </div>
+              <div style={{ fontSize: 17, color: COLORS.ink, lineHeight: 1.4 }}>{taskRef.current}</div>
+            </div>
+
+            <CircularTimer progress={progress} timeLeft={timeLeft} total={total} paused={paused} done={isDone} />
+
+            {isDone && (
+              <div style={{
+                background: "#EAF4EF", border: `1px solid ${COLORS.done}`, borderRadius: 4,
+                padding: "10px 16px", fontSize: 13, color: COLORS.done, letterSpacing: 1, textAlign: "center",
+              }}>
+                Time's up.
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, width: "100%" }}>
+              {!isDone && (
+                <button onClick={handlePause} style={{
+                  flex: 1, background: COLORS.bg, border: `1.5px solid ${COLORS.ring}`, borderRadius: 4,
+                  padding: "11px", fontSize: 12, letterSpacing: 2, textTransform: "uppercase",
+                  cursor: "pointer", color: COLORS.ink, fontFamily: "Georgia, serif",
+                }}>
+                  {paused ? "Resume" : "Pause"}
+                </button>
+              )}
+              <button onClick={handleDone} style={{
+                flex: 1, background: isDone ? COLORS.done : COLORS.accent, color: "#fff",
+                border: "none", borderRadius: 4, padding: "11px", fontSize: 12,
+                letterSpacing: 2, textTransform: "uppercase", cursor: "pointer", fontFamily: "Georgia, serif",
+              }}>
+                {isDone ? "Next" : "Done"}
+              </button>
+            </div>
+
+            {!isDone && (
+              <button onClick={handleStop} style={{
+                background: "none", border: "none", color: COLORS.faded, fontSize: 11,
+                cursor: "pointer", letterSpacing: 1, textDecoration: "underline", padding: 0,
+              }}>
+                abandon session
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {history.length > 0 && (
+        <div style={{ marginTop: 32, width: "100%", maxWidth: 380 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+            <div style={{ fontSize: 10, letterSpacing: 4, color: COLORS.faded, textTransform: "uppercase" }}>
+              Today's Sessions
+            </div>
+            <button onClick={() => exportMarkdown(history)} style={{
+              background: "none", border: `1px solid ${COLORS.ring}`, borderRadius: 3,
+              padding: "3px 9px", fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase",
+              color: COLORS.faded, cursor: "pointer", fontFamily: "Georgia, serif",
+            }}>
+              Export .md
+            </button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {history.map((h, i) => <TaskCard key={i} task={h.task} elapsed={h.elapsed} />)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+```
+
+  </script>
+</body>
+</html>
