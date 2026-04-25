@@ -351,6 +351,29 @@
         setPaused(false);
       };
 
+      useEffect(() => {
+        const handleVisible = () => {
+          if (document.visibilityState === "visible" && !paused && startRef.current) {
+            var secondsElapsed = Math.floor((Date.now() - startRef.current) / 1000);
+            elapsedRef.current = secondsElapsed;
+            setElapsed(secondsElapsed);
+            if (modeRef.current !== "stopwatch") {
+              var left = totalRef.current - secondsElapsed;
+              if (left <= 0) {
+                clearTimer();
+                setTimeLeft(0);
+                setPhase("done");
+                playChime();
+              } else {
+                setTimeLeft(left);
+              }
+            }
+          }
+        };
+        document.addEventListener("visibilitychange", handleVisible);
+        return () => document.removeEventListener("visibilitychange", handleVisible);
+      }, [paused, clearTimer]);
+
       useEffect(() => () => clearTimer(), [clearTimer]);
 
       const progress = total > 0 ? timeLeft / total : 0;
