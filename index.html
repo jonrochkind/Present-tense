@@ -31,12 +31,14 @@
 
     const pad = (n) => String(n).padStart(2, "0");
 
-    function CircularTimer({ progress, timeLeft, total, paused, done }) {
+    function CircularTimer({ progress, timeLeft, elapsed, mode, paused, done }) {
       const r = 90;
       const circ = 2 * Math.PI * r;
-      const offset = circ * (1 - progress);
-      const mins = Math.floor(timeLeft / 60);
-      const secs = timeLeft % 60;
+      const swProgress = mode === "stopwatch" ? (elapsed % 1800) / 1800 : progress;
+      const offset = circ * (1 - swProgress);
+      const displaySecs = mode === "stopwatch" ? elapsed : timeLeft;
+      const mins = Math.floor(displaySecs / 60);
+      const secs = displaySecs % 60;
 
       return (
         <div style={{ position: "relative", width: 220, height: 220, margin: "0 auto" }}>
@@ -62,11 +64,9 @@
             }}>
               {pad(mins)}:{pad(secs)}
             </span>
-            {total > 0 && (
-              <span style={{ fontFamily: "Georgia, serif", fontSize: 11, color: COLORS.faded }}>
-                of {Math.floor(total / 60)} min
-              </span>
-            )}
+            <span style={{ fontFamily: "Georgia, serif", fontSize: 11, color: COLORS.faded }}>
+              {mode === "stopwatch" ? "elapsed" : "of " + Math.floor((timeLeft + elapsed) / 60) + " min"}
+            </span>
           </div>
         </div>
       );
@@ -74,18 +74,22 @@
 
     function exportMarkdown(history) {
       const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-      const totalSecs = history.reduce((sum, h) => sum + h.elapsed, 0);
+      const totalSecs = history.reduce(function(sum, h) { return sum + h.elapsed; }, 0);
       const totalMins = Math.floor(totalSecs / 60);
       const totalRemSecs = totalSecs % 60;
       const lines = [
         "- " + today,
         "\t- Total focused time: " + totalMins + "m " + totalRemSecs + "s",
-        ...history.slice().reverse().map((h) => {
-          const m = Math.floor(h.elapsed / 60);
-          const s = h.elapsed % 60;
-          return "\t\t- " + h.task + " :: " + m + "m " + s + "s";
-        }),
       ];
+      history.slice().reverse().forEach(function(h) {
+        const m = Math.floor(h.elapsed / 60);
+        const s = h.elapsed % 60;
+        const ratingStr = h.rating ? " :: focus " + h.rating + "/5" : "";
+        lines.push("\t\t- " + h.task + " :: " + m + "m " + s + "s" + ratingStr);
+        if (h.comment) {
+          lines.push("\t\t\t- " + h.comment);
+        }
+      });
       const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -95,26 +99,128 @@
       URL.revokeObjectURL(url);
     }
 
-    function TaskCard({ task, elapsed }) {
+    function TaskCard({ task, elapsed, rating, comment }) {
       return (
         <div style={{
-          background: COLORS.paper, border: `1.5px solid ${COLORS.ring}`,
-          borderRadius: 4, padding: "8px 14px", display: "flex",
-          justifyContent: "space-between", alignItems: "center", gap: 12,
+          background: COLORS.paper, border: "1.5px solid " + COLORS.ring,
+          borderRadius: 4, padding: "10px 14px", display: "flex",
+          flexDirection: "column", gap: 4,
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ color: COLORS.done, fontSize: 14 }}>✓</span>
-            <span style={{ fontFamily: "Georgia, serif", fontSize: 13, color: COLORS.ink }}>{task}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ color: COLORS.done, fontSize: 14 }}>&#10003;</span>
+              <span style={{ fontFamily: "Georgia, serif", fontSize: 13, color: COLORS.ink }}>{task}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              {rating && (
+                <div style={{ display: "flex", gap: 2 }}>
+                  {[1,2,3,4,5].map(function(d) {
+                    return (
+                      <div key={d} style={{
+                        width: 6, height: 6, borderRadius: "50%",
+                        background: d <= rating ? COLORS.accent : COLORS.ring,
+                      }} />
+                    );
+                  })}
+                </div>
+              )}
+              <span style={{ fontFamily: "'Courier New', monospace", fontSize: 11, color: COLORS.faded, whiteSpace: "nowrap" }}>
+                {Math.floor(elapsed / 60)}m {elapsed % 60}s
+              </span>
+            </div>
           </div>
-          <span style={{ fontFamily: "'Courier New', monospace", fontSize: 11, color: COLORS.faded, whiteSpace: "nowrap" }}>
-            {Math.floor(elapsed / 60)}m {elapsed % 60}s
-          </span>
+          {comment && (
+            <div style={{ fontFamily: "Georgia, serif", fontSize: 12, color: COLORS.faded, paddingLeft: 24, fontStyle: "italic" }}>
+              {comment}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function RatingScreen({ taskName, elapsed, onSave }) {
+      const [rating, setRating] = useState(null);
+      const [comment, setComment] = useState("");
+      const [hovered, setHovered] = useState(null);
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24, alignItems: "center" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 6 }}>
+              Completed
+            </div>
+            <div style={{ fontSize: 17, color: COLORS.ink, lineHeight: 1.4, marginBottom: 4 }}>{taskName}</div>
+            <div style={{ fontFamily: "'Courier New', monospace", fontSize: 13, color: COLORS.faded }}>
+              {mins}m {secs}s
+            </div>
+          </div>
+
+          <div style={{ width: "100%" }}>
+            <div style={{ fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 12, textAlign: "center" }}>
+              How was your focus?
+            </div>
+            <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+              {[1,2,3,4,5].map(function(n) {
+                const isSelected = rating === n;
+                const isHov = hovered === n;
+                return (
+                  <button
+                    key={n}
+                    onClick={() => setRating(n)}
+                    onMouseEnter={() => setHovered(n)}
+                    onMouseLeave={() => setHovered(null)}
+                    style={{
+                      width: 44, height: 44, borderRadius: "50%",
+                      background: isSelected ? COLORS.accent : (isHov ? COLORS.ring : COLORS.bg),
+                      border: "1.5px solid " + (isSelected ? COLORS.accent : COLORS.ring),
+                      color: isSelected ? "#fff" : COLORS.ink,
+                      fontSize: 16, fontFamily: "Georgia, serif",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {n}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ width: "100%" }}>
+            <label style={{ display: "block", fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 8 }}>
+              Any notes? (optional)
+            </label>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Got distracted halfway through..."
+              rows={2}
+              style={{
+                width: "100%", background: COLORS.bg, border: "1px solid " + COLORS.ring,
+                borderRadius: 4, padding: "10px 12px", fontFamily: "Georgia, serif",
+                fontSize: 14, color: COLORS.ink, resize: "none", outline: "none", lineHeight: 1.5,
+              }}
+            />
+          </div>
+
+          <button
+            onClick={() => onSave(rating, comment.trim())}
+            style={{
+              width: "100%", background: COLORS.done, color: "#fff", border: "none",
+              borderRadius: 4, padding: "13px", fontSize: 13, letterSpacing: 3,
+              textTransform: "uppercase", cursor: "pointer", fontFamily: "Georgia, serif",
+            }}
+          >
+            Save
+          </button>
         </div>
       );
     }
 
     function App() {
       const [phase, setPhase] = useState("entry");
+      const [mode, setMode] = useState("timer");
       const [task, setTask] = useState("");
       const [minutes, setMinutes] = useState("");
       const [timeLeft, setTimeLeft] = useState(0);
@@ -125,6 +231,7 @@
       const intervalRef = useRef(null);
       const taskRef = useRef("");
       const elapsedRef = useRef(0);
+      const modeRef = useRef("timer");
 
       const clearTimer = useCallback(() => {
         if (intervalRef.current) clearInterval(intervalRef.current);
@@ -133,28 +240,34 @@
       const startCounting = useCallback(() => {
         clearTimer();
         intervalRef.current = setInterval(() => {
-          setTimeLeft((prev) => {
-            if (prev <= 1) {
-              clearInterval(intervalRef.current);
-              setPhase("done");
-              return 0;
-            }
-            return prev - 1;
-          });
           elapsedRef.current += 1;
-          setElapsed((e) => e + 1);
+          setElapsed(function(e) { return e + 1; });
+          if (modeRef.current !== "stopwatch") {
+            setTimeLeft(function(prev) {
+              if (prev <= 1) {
+                clearInterval(intervalRef.current);
+                setPhase("done");
+                return 0;
+              }
+              return prev - 1;
+            });
+          }
         }, 1000);
       }, [clearTimer]);
 
       const handleStart = () => {
-        const mins = parseFloat(minutes);
-        if (!task.trim() || isNaN(mins) || mins <= 0) return;
-        const secs = Math.round(mins * 60);
+        if (!task.trim()) return;
+        if (mode === "timer") {
+          const mins = parseFloat(minutes);
+          if (isNaN(mins) || mins <= 0) return;
+          const secs = Math.round(mins * 60);
+          setTotal(secs);
+          setTimeLeft(secs);
+        }
+        modeRef.current = mode;
         taskRef.current = task.trim();
         elapsedRef.current = 0;
         setElapsed(0);
-        setTotal(secs);
-        setTimeLeft(secs);
         setPhase("running");
         setPaused(false);
         startCounting();
@@ -167,14 +280,23 @@
 
       const handleDone = () => {
         clearTimer();
-        setHistory((h) => [{ task: taskRef.current, elapsed: elapsedRef.current }, ...h]);
-        setPhase("entry"); setTask(""); setMinutes(""); setTimeLeft(0); setTotal(0); setPaused(false);
+        setPhase("rating");
       };
 
       const handleStop = () => {
         clearTimer();
-        setHistory((h) => [{ task: taskRef.current, elapsed: elapsedRef.current }, ...h]);
-        setPhase("entry"); setTask(""); setMinutes(""); setPaused(false);
+        setPhase("rating");
+      };
+
+      const handleSaveRating = (rating, comment) => {
+        const entry = { task: taskRef.current, elapsed: elapsedRef.current, rating: rating, comment: comment };
+        setHistory(function(h) { return [entry, ...h]; });
+        setPhase("entry");
+        setTask("");
+        setMinutes("");
+        setTimeLeft(0);
+        setTotal(0);
+        setPaused(false);
       };
 
       useEffect(() => () => clearTimer(), [clearTimer]);
@@ -196,66 +318,94 @@
           </div>
 
           <div style={{
-            background: COLORS.paper, border: `1.5px solid ${COLORS.ring}`, borderRadius: 6,
+            background: COLORS.paper, border: "1.5px solid " + COLORS.ring, borderRadius: 6,
             padding: "36px 32px", width: "100%", maxWidth: 380,
             boxShadow: "0 2px 24px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04)",
           }}>
+
             {phase === "entry" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                <div style={{ display: "flex", background: COLORS.bg, borderRadius: 4, padding: 3, gap: 3 }}>
+                  {["timer", "stopwatch"].map(function(m) {
+                    return (
+                      <button key={m} onClick={() => setMode(m)} style={{
+                        flex: 1, padding: "7px", borderRadius: 3, border: "none",
+                        background: mode === m ? COLORS.paper : "transparent",
+                        boxShadow: mode === m ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                        color: mode === m ? COLORS.ink : COLORS.faded,
+                        fontSize: 11, letterSpacing: 2, textTransform: "uppercase", cursor: "pointer",
+                      }}>
+                        {m === "timer" ? "Timer" : "Open-ended"}
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <div>
                   <label style={{ display: "block", fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 8 }}>
                     What are you doing?
                   </label>
                   <textarea
                     value={task} onChange={(e) => setTask(e.target.value)}
-                    placeholder="Writing weekly review…" rows={2}
+                    placeholder="Writing weekly review..." rows={2}
                     style={{
-                      width: "100%", background: COLORS.bg, border: `1px solid ${COLORS.ring}`,
+                      width: "100%", background: COLORS.bg, border: "1px solid " + COLORS.ring,
                       borderRadius: 4, padding: "10px 12px", fontFamily: "Georgia, serif",
                       fontSize: 15, color: COLORS.ink, resize: "none", outline: "none", lineHeight: 1.5,
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        document.getElementById("mins-input")?.focus();
+                        if (mode === "timer") {
+                          const el = document.getElementById("mins-input");
+                          if (el) el.focus();
+                        } else {
+                          handleStart();
+                        }
                       }
                     }}
                   />
                 </div>
-                <div>
-                  <label style={{ display: "block", fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 8 }}>
-                    For how long? (minutes)
-                  </label>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {[5, 10, 15, 25, 45].map((m) => (
-                      <button key={m} onClick={() => setMinutes(String(m))} style={{
-                        background: minutes === String(m) ? COLORS.accent : COLORS.bg,
-                        color: minutes === String(m) ? "#fff" : COLORS.faded,
-                        border: `1px solid ${minutes === String(m) ? COLORS.accent : COLORS.ring}`,
-                        borderRadius: 3, padding: "5px 10px",
-                        fontFamily: "'Courier New', monospace", fontSize: 12, cursor: "pointer",
-                      }}>{m}</button>
-                    ))}
-                    <input
-                      id="mins-input" type="number" value={minutes}
-                      onChange={(e) => setMinutes(e.target.value)}
-                      placeholder="other" min="0.5" step="0.5"
-                      style={{
-                        width: 70, background: COLORS.bg, border: `1px solid ${COLORS.ring}`,
-                        borderRadius: 3, padding: "5px 10px",
-                        fontFamily: "'Courier New', monospace", fontSize: 12, color: COLORS.ink, outline: "none",
-                      }}
-                      onKeyDown={(e) => e.key === "Enter" && handleStart()}
-                    />
+
+                {mode === "timer" && (
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 8 }}>
+                      For how long? (minutes)
+                    </label>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {[5, 10, 15, 25, 45].map(function(m) {
+                        return (
+                          <button key={m} onClick={() => setMinutes(String(m))} style={{
+                            background: minutes === String(m) ? COLORS.accent : COLORS.bg,
+                            color: minutes === String(m) ? "#fff" : COLORS.faded,
+                            border: "1px solid " + (minutes === String(m) ? COLORS.accent : COLORS.ring),
+                            borderRadius: 3, padding: "5px 10px",
+                            fontFamily: "'Courier New', monospace", fontSize: 12, cursor: "pointer",
+                          }}>{m}</button>
+                        );
+                      })}
+                      <input
+                        id="mins-input" type="number" value={minutes}
+                        onChange={(e) => setMinutes(e.target.value)}
+                        placeholder="other" min="0.5" step="0.5"
+                        style={{
+                          width: 70, background: COLORS.bg, border: "1px solid " + COLORS.ring,
+                          borderRadius: 3, padding: "5px 10px",
+                          fontFamily: "'Courier New', monospace", fontSize: 12, color: COLORS.ink, outline: "none",
+                        }}
+                        onKeyDown={(e) => e.key === "Enter" && handleStart()}
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
+
                 <button onClick={handleStart}
-                  disabled={!task.trim() || !minutes || isNaN(parseFloat(minutes)) || parseFloat(minutes) <= 0}
+                  disabled={!task.trim() || (mode === "timer" && (!minutes || isNaN(parseFloat(minutes)) || parseFloat(minutes) <= 0))}
                   style={{
                     background: COLORS.accent, color: "#fff", border: "none", borderRadius: 4,
                     padding: "13px", fontSize: 13, letterSpacing: 3, textTransform: "uppercase",
                     cursor: "pointer", fontFamily: "Georgia, serif",
-                    opacity: (!task.trim() || !minutes) ? 0.4 : 1, marginTop: 4,
+                    opacity: (!task.trim() || (mode === "timer" && !minutes)) ? 0.4 : 1, marginTop: 4,
                   }}>
                   Begin
                 </button>
@@ -266,26 +416,20 @@
               <div style={{ display: "flex", flexDirection: "column", gap: 24, alignItems: "center" }}>
                 <div style={{ textAlign: "center" }}>
                   <div style={{ fontSize: 11, letterSpacing: 3, color: COLORS.faded, textTransform: "uppercase", marginBottom: 6 }}>
-                    {isDone ? "Completed" : paused ? "Paused" : "Now"}
+                    {isDone ? "Time's up" : paused ? "Paused" : "Now"}
                   </div>
                   <div style={{ fontSize: 17, color: COLORS.ink, lineHeight: 1.4 }}>{taskRef.current}</div>
                 </div>
 
-                <CircularTimer progress={progress} timeLeft={timeLeft} total={total} paused={paused} done={isDone} />
-
-                {isDone && (
-                  <div style={{
-                    background: "#EAF4EF", border: `1px solid ${COLORS.done}`, borderRadius: 4,
-                    padding: "10px 16px", fontSize: 13, color: COLORS.done, letterSpacing: 1, textAlign: "center",
-                  }}>
-                    Time's up.
-                  </div>
-                )}
+                <CircularTimer
+                  progress={progress} timeLeft={timeLeft} elapsed={elapsed}
+                  mode={modeRef.current} paused={paused} done={isDone}
+                />
 
                 <div style={{ display: "flex", gap: 10, width: "100%" }}>
                   {!isDone && (
                     <button onClick={handlePause} style={{
-                      flex: 1, background: COLORS.bg, border: `1.5px solid ${COLORS.ring}`, borderRadius: 4,
+                      flex: 1, background: COLORS.bg, border: "1.5px solid " + COLORS.ring, borderRadius: 4,
                       padding: "11px", fontSize: 12, letterSpacing: 2, textTransform: "uppercase",
                       cursor: "pointer", color: COLORS.ink, fontFamily: "Georgia, serif",
                     }}>
@@ -297,7 +441,7 @@
                     border: "none", borderRadius: 4, padding: "11px", fontSize: 12,
                     letterSpacing: 2, textTransform: "uppercase", cursor: "pointer", fontFamily: "Georgia, serif",
                   }}>
-                    {isDone ? "Next" : "Done"}
+                    Done
                   </button>
                 </div>
 
@@ -311,6 +455,15 @@
                 )}
               </div>
             )}
+
+            {phase === "rating" && (
+              <RatingScreen
+                taskName={taskRef.current}
+                elapsed={elapsedRef.current}
+                onSave={handleSaveRating}
+              />
+            )}
+
           </div>
 
           {history.length > 0 && (
@@ -320,7 +473,7 @@
                   Today's Sessions
                 </div>
                 <button onClick={() => exportMarkdown(history)} style={{
-                  background: "none", border: `1px solid ${COLORS.ring}`, borderRadius: 3,
+                  background: "none", border: "1px solid " + COLORS.ring, borderRadius: 3,
                   padding: "3px 9px", fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase",
                   color: COLORS.faded, cursor: "pointer", fontFamily: "Georgia, serif",
                 }}>
@@ -328,7 +481,9 @@
                 </button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {history.map((h, i) => <TaskCard key={i} task={h.task} elapsed={h.elapsed} />)}
+                {history.map(function(h, i) {
+                  return <TaskCard key={i} task={h.task} elapsed={h.elapsed} rating={h.rating} comment={h.comment} />;
+                })}
               </div>
             </div>
           )}
